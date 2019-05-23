@@ -1,15 +1,55 @@
-# Use the latest 2.1 version of CircleCI pipeline processing engine, see https://circleci.com/docs/2.0/configuration-reference/
-version: 2.1
-
-# Use a package of configuration called an orb, see https://circleci.com/docs/2.0/orb-intro/
-orbs:
-  # Declare a dependency on the welcome-orb
-  welcome: circleci/welcome-orb@0.3.1
-
-# Orchestrate or schedule a set of jobs, see https://circleci.com/docs/2.0/workflows/
+version: 2
+jobs:
+  build:
+    docker:
+      - image: circleci/golang:1.9
+    working_directory: /go/src/github.com/masroorhasan/spotifycli
+    steps:
+      - checkout
+      - run: go get -u github.com/golang/dep/cmd/dep
+      - run:
+          name: run build
+          command: |
+            dep ensure
+            go build -v
+      - run:
+          name: run tests
+          command: |
+            go fmt ./...
+            go vet ./...
+            go test -v ./...
+  deploy:
+    docker:
+      - image: circleci/golang:1.9
+    working_directory: /go/src/github.com/djiwandou/go-tdd
+    steps:
+      - checkout
+      - run: go get -u github.com/mitchellh/gox
+      - run: go get -u github.com/tcnksm/ghr
+      - run: go get -u github.com/stevenmatthewt/semantics
+      - run:
+          name: cross compile
+          command: |
+            gox -os="linux darwin windows" -arch="amd64" -output="dist/gotddcli_{{.OS}}_{{.Arch}}"
+            cd dist/ && gzip *
+      - add_ssh_keys
+      - run:
+          name: create release
+          command: |
+            tag=$(semantics --output-tag)
+            if [ "$tag" ]; then
+              ghr -t $GITHUB_TOKEN -u $CIRCLE_PROJECT_USERNAME -r $CIRCLE_PROJECT_REPONAME --replace $tag dist/
+            else
+              echo "The commit message(s) did not indicate a major/minor/patch version."
+            fi
 workflows:
-  # Name the workflow "Welcome"
-  Welcome:
-    # Run the welcome/run job in its own container
+  version: 2
+  build-deploy:
     jobs:
-      - welcome/run
+      - build
+      - deploy:
+          requires:
+            - build
+          filters:
+            branches:
+              only: master
